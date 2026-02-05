@@ -21,6 +21,8 @@ export function PosTerminal() {
     cart,
     sales,
     isLoaded,
+    isSaving,
+    isPersistent,
     addToCart,
     removeFromCart,
     updateQuantity,
@@ -32,6 +34,8 @@ export function PosTerminal() {
     deleteProduct,
     clearSales,
     getTodayStats,
+    handleExport,
+    handleImport,
   } = usePosStore()
 
   const [search, setSearch] = useState('')
@@ -137,6 +141,10 @@ export function PosTerminal() {
         onClearSales={clearSales}
         todayStats={getTodayStats()}
         onAddProduct={handleAddProduct}
+        onExport={handleExport}
+        onImport={handleImport}
+        isSaving={isSaving}
+        isPersistent={isPersistent}
       />
 
       <main className="container px-4 py-4">

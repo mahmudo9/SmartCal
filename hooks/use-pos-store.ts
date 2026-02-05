@@ -1,81 +1,87 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Product, CartItem, Sale } from '@/lib/types'
-
-const STORAGE_KEYS = {
-  products: 'smartpos-products-v3',
-  sales: 'smartpos-sales',
-}
-
-const defaultProducts: Product[] = [
-  { id: '1', name: 'Учебник Python', price: 1500, icon: 'BookOpen', category: 'books', slot: 1 },
-  { id: '2', name: 'Роман', price: 650, icon: 'BookOpen', category: 'books', slot: 1 },
-  { id: '3', name: 'Шариковая ручка', price: 50, icon: 'Pen', category: 'pens', slot: 2 },
-  { id: '4', name: 'Гелевая ручка', price: 120, icon: 'Pen', category: 'pens', slot: 2 },
-  { id: '5', name: 'Набор наклеек', price: 200, icon: 'Tags', category: 'stickers', slot: 3 },
-  { id: '6', name: 'Виниловая наклейка', price: 80, icon: 'Tags', category: 'stickers', slot: 3 },
-  { id: '7', name: 'Обложка для книги', price: 350, icon: 'BookMarked', category: 'covers', slot: 4 },
-  { id: '8', name: 'Обложка на паспорт', price: 450, icon: 'BookMarked', category: 'covers', slot: 4 },
-  { id: '9', name: 'MacBook Pro', price: 180000, icon: 'Laptop', category: 'laptops', slot: 5 },
-  { id: '10', name: 'Lenovo ThinkPad', price: 95000, icon: 'Laptop', category: 'laptops', slot: 5 },
-  { id: '11', name: 'Механическая клавиатура', price: 8500, icon: 'Keyboard', category: 'keyboards', slot: 6 },
-  { id: '12', name: 'Беспроводная клавиатура', price: 4500, icon: 'Keyboard', category: 'keyboards', slot: 6 },
-  { id: '13', name: 'Игровая мышь', price: 5500, icon: 'Mouse', category: 'mice', slot: 1 },
-  { id: '14', name: 'Беспроводная мышь', price: 2500, icon: 'Mouse', category: 'mice', slot: 1 },
-  { id: '15', name: 'Canon EOS R5', price: 350000, icon: 'Camera', category: 'cameras', slot: 2 },
-  { id: '16', name: 'Sony Alpha A7', price: 180000, icon: 'Camera', category: 'cameras', slot: 2 },
-  { id: '17', name: 'Монитор 27"', price: 35000, icon: 'Monitor', category: 'monitors', slot: 3 },
-  { id: '18', name: 'Монитор 32" 4K', price: 55000, icon: 'Monitor', category: 'monitors', slot: 3 },
-  { id: '19', name: 'Лазерный принтер', price: 25000, icon: 'Printer', category: 'printers', slot: 4 },
-  { id: '20', name: 'МФУ цветной', price: 45000, icon: 'Printer', category: 'printers', slot: 4 },
-]
+import {
+  saveProducts,
+  loadProducts,
+  saveSales,
+  loadSales,
+  requestPersistentStorage,
+  exportData,
+  downloadExport,
+  importData,
+} from '@/lib/storage'
 
 export function usePosStore() {
   const [products, setProducts] = useState<Product[]>([])
   const [cart, setCart] = useState<CartItem[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [isLoaded, setIsLoaded] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isPersistent, setIsPersistent] = useState(false)
+  
+  // Track if this is the initial load
+  const initialLoadDone = useRef(false)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Load from localStorage on mount
+  // Request persistent storage and load data on mount
   useEffect(() => {
-    const savedProducts = localStorage.getItem(STORAGE_KEYS.products)
-    const savedSales = localStorage.getItem(STORAGE_KEYS.sales)
-
-    if (savedProducts) {
-      try {
-        setProducts(JSON.parse(savedProducts))
-      } catch {
-        setProducts(defaultProducts)
-      }
-    } else {
-      setProducts(defaultProducts)
+    const initStorage = async () => {
+      // Request persistent storage for iOS protection
+      const persistent = await requestPersistentStorage()
+      setIsPersistent(persistent)
+      
+      // Load saved data
+      const [savedProducts, savedSales] = await Promise.all([
+        loadProducts(),
+        loadSales(),
+      ])
+      
+      setProducts(savedProducts)
+      setSales(savedSales)
+      setIsLoaded(true)
+      initialLoadDone.current = true
     }
 
-    if (savedSales) {
-      try {
-        setSales(JSON.parse(savedSales))
-      } catch {
-        setSales([])
-      }
-    }
-
-    setIsLoaded(true)
+    initStorage()
   }, [])
 
-  // Save products to localStorage
+  // Auto-save products with debounce
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(STORAGE_KEYS.products, JSON.stringify(products))
+    if (!initialLoadDone.current) return
+    
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
     }
-  }, [products, isLoaded])
+    
+    // Debounce save to prevent too many writes
+    saveTimeoutRef.current = setTimeout(async () => {
+      setIsSaving(true)
+      await saveProducts(products)
+      setIsSaving(false)
+    }, 100)
 
-  // Save sales to localStorage
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(STORAGE_KEYS.sales, JSON.stringify(sales))
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
     }
-  }, [sales, isLoaded])
+  }, [products])
+
+  // Auto-save sales immediately (important transaction data)
+  useEffect(() => {
+    if (!initialLoadDone.current) return
+    
+    const saveSalesData = async () => {
+      setIsSaving(true)
+      await saveSales(sales)
+      setIsSaving(false)
+    }
+    
+    saveSalesData()
+  }, [sales])
 
   const addToCart = useCallback((product: Product) => {
     setCart((prev) => {
@@ -166,11 +172,27 @@ export function usePosStore() {
     }
   }, [sales])
 
+  // Export data function
+  const handleExport = useCallback(async () => {
+    const data = await exportData()
+    downloadExport(data)
+  }, [])
+
+  // Import data function
+  const handleImport = useCallback(async (file: File) => {
+    const { products: importedProducts, sales: importedSales } =
+      await importData(file)
+    setProducts(importedProducts)
+    setSales(importedSales)
+  }, [])
+
   return {
     products,
     cart,
     sales,
     isLoaded,
+    isSaving,
+    isPersistent,
     addToCart,
     removeFromCart,
     updateQuantity,
@@ -182,5 +204,7 @@ export function usePosStore() {
     deleteProduct,
     clearSales,
     getTodayStats,
+    handleExport,
+    handleImport,
   }
 }
